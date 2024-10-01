@@ -9,7 +9,7 @@
 
 [main.cpp](main.cpp)
 
-Результат запуска на apple m1:
+Результат запуска на apple m1 pro:
 ```
 L1 cache: 64 Kb, 8-ways, 128 bytes line
 ```
