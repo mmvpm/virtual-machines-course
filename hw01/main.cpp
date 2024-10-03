@@ -90,7 +90,7 @@ int main() {
 
     // determine cache size & associativity
     vector<pair<size_t, set<int>>> jumps_log; // { way_size, jumps }
-    for (size_t way_size = 16; way_size < MAX_WAY_SIZE; way_size <<= 1) {
+    for (size_t way_size = 2; way_size < MAX_WAY_SIZE; way_size <<= 1) {
         log << "Times for way size " << prettify_bytes(way_size) << ":" << endl;
         set<int> jumps;
         int64_t previous_ns = -1;
@@ -144,7 +144,7 @@ int main() {
     jumps_log.clear();
     int64_t previous_ns = -1;
     size_t result_cache_line_size = -1;
-    for (size_t cache_line_size = 16; cache_line_size < 1024; cache_line_size <<= 1) {
+    for (size_t cache_line_size = 2; cache_line_size < 1024; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
         for (int spots = 1; spots <= 512; spots <<= 1) {
