@@ -1,5 +1,3 @@
-//#pragma GCC optimize("O3")
-
 #include <iostream>
 #include <vector>
 #include <numeric>
@@ -48,11 +46,6 @@ vector<size_t> generate_permutation(size_t n) {
         last_index = (last_index + 1) % n;
     }
 
-//    vector<size_t> result(n);
-//    for (int i = 0; i < n; ++i) {
-//        result[permutation[i]] = permutation[(i + 1) % n];
-//    }
-
     return permutation;
 }
 
@@ -74,12 +67,9 @@ int64_t run_experiment(size_t stride, size_t spots) {
     uint8_t **pointer = prepare_pointer(stride, spots);
 
     auto start = chrono::high_resolution_clock::now();
-//    int64_t tmp = 0;
     for (size_t i = 0; i < ITERATIONS; ++i) {
         pointer = (uint8_t **) (*pointer);
-//        tmp += **pointer;
     }
-//    if (tmp > ITERATIONS * BUFFER_MOD) cout << tmp; // never happens
     int64_t elapsed_ns = (chrono::high_resolution_clock::now() - start).count();
 
     return elapsed_ns;
