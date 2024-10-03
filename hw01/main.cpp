@@ -14,7 +14,7 @@ const bool VERBOSE = true;
 #define log if (VERBOSE) cout
 
 // constants
-static const size_t MAX_MEMORY = 1 << 30; // 1 Gb
+static const size_t MAX_MEMORY = (1 << 30) / sizeof(size_t); // 1 Gb
 static const int MAX_ASSOCIATIVITY = 16;
 static const int MAX_WAY_SIZE = MAX_MEMORY / MAX_ASSOCIATIVITY;
 static const double DIFF_THRESHOLD = 0.25;
@@ -23,7 +23,7 @@ static const size_t ITERATIONS = 10'000'000;
 static const size_t BUFFER_MOD = 128;
 
 // memory buffer
-vector<uint8_t> buffer;
+vector<size_t> buffer;
 
 string prettify_bytes(size_t bytes) {
     const char *units[] = {"bytes", "Kb", "Mb", "Gb"};
@@ -54,13 +54,13 @@ vector<size_t> generate_permutation(size_t n) {
     return permutation;
 }
 
-uint8_t **prepare_pointer(size_t stride, size_t spots) {
+size_t **prepare_pointer(size_t stride, size_t spots) {
     vector<size_t> path = generate_permutation(spots);
 
-    auto **pointer = (uint8_t **) (&buffer[path[spots - 1]]);
+    size_t **pointer;
     for (size_t i = 0; i < spots; ++i) {
         size_t index = path[i];
-        pointer = (uint8_t **) (&buffer[index * stride]);
+        pointer = (size_t **) (&buffer[index * stride]);
         size_t next_index = path[(i + 1) % spots];
         *pointer = &buffer[next_index * stride];
     }
@@ -69,12 +69,12 @@ uint8_t **prepare_pointer(size_t stride, size_t spots) {
 }
 
 int64_t run_experiment(size_t stride, size_t spots) {
-    uint8_t **pointer = prepare_pointer(stride, spots);
+    size_t **pointer = prepare_pointer(stride, spots);
 
     auto start = chrono::high_resolution_clock::now();
 //    int64_t tmp = 0;
     for (size_t i = 0; i < ITERATIONS; ++i) {
-        pointer = (uint8_t **) (*pointer);
+        pointer = (size_t **) (*pointer);
 //        tmp += **pointer;
     }
 //    if (tmp > ITERATIONS * BUFFER_MOD) cout << tmp; // never happens
@@ -85,7 +85,7 @@ int64_t run_experiment(size_t stride, size_t spots) {
 
 int main() {
     // init
-    buffer = vector<uint8_t>(MAX_MEMORY);
+    buffer = vector<size_t>(MAX_MEMORY);
     for (int i = 0; i < MAX_MEMORY; ++i) buffer[i] = i % BUFFER_MOD;
 
     // determine cache size & associativity
