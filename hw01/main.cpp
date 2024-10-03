@@ -17,9 +17,9 @@ const bool VERBOSE = true;
 static const size_t MAX_MEMORY = 1 << 30; // 1 Gb
 static const int MAX_ASSOCIATIVITY = 16;
 static const int MAX_WAY_SIZE = MAX_MEMORY / MAX_ASSOCIATIVITY;
-static const double DIFF_THRESHOLD = 0.1;
+static const double DIFF_THRESHOLD = 0.25;
 
-static const size_t ITERATIONS = 50'000'000;
+static const size_t ITERATIONS = 10'000'000;
 static const size_t BUFFER_MOD = 128;
 
 // memory buffer
@@ -72,12 +72,12 @@ int64_t run_experiment(size_t stride, size_t spots) {
     uint8_t **pointer = prepare_pointer(stride, spots);
 
     auto start = chrono::high_resolution_clock::now();
-    int64_t tmp = 0;
+//    int64_t tmp = 0;
     for (size_t i = 0; i < ITERATIONS; ++i) {
         pointer = (uint8_t **) (*pointer);
-        tmp += **pointer;
+//        tmp += **pointer;
     }
-    if (tmp > ITERATIONS * BUFFER_MOD) cout << tmp; // never happens
+//    if (tmp > ITERATIONS * BUFFER_MOD) cout << tmp; // never happens
     int64_t elapsed_ns = (chrono::high_resolution_clock::now() - start).count();
 
     return elapsed_ns;
@@ -147,7 +147,7 @@ int main() {
     for (size_t cache_line_size = 16; cache_line_size < 1024; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
-        for (int spots = 1; spots <= 1024; spots <<= 1) {
+        for (int spots = 1; spots <= 512; spots <<= 1) {
             int64_t current_ns = run_experiment(result_cache_size + cache_line_size, spots);
             double diff = (double) (current_ns - previous_ns) / (double) current_ns;
             log << "spots = " << spots << ", time = " << current_ns << " ns, diff = " << diff * 100 << "%" << endl;
