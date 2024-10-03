@@ -46,12 +46,12 @@ vector<size_t> generate_permutation(size_t n) {
         last_index = (last_index + 1) % n;
     }
 
-    vector<size_t> result(n);
-    for (int i = 0; i < n; ++i) {
-        result[permutation[i]] = permutation[(i + 1) % n];
-    }
+//    vector<size_t> result(n);
+//    for (int i = 0; i < n; ++i) {
+//        result[permutation[i]] = permutation[(i + 1) % n];
+//    }
 
-    return result;
+    return permutation;
 }
 
 uint8_t **prepare_pointer(size_t stride, size_t spots) {
