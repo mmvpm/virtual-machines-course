@@ -14,16 +14,16 @@ const bool VERBOSE = true;
 #define log if (VERBOSE) cout
 
 // constants
-static const size_t MAX_MEMORY = (1 << 30) / sizeof(size_t); // 1 Gb
+static const size_t MAX_MEMORY = 1 << 30; // 1 Gb
 static const int MAX_ASSOCIATIVITY = 16;
 static const int MAX_WAY_SIZE = MAX_MEMORY / MAX_ASSOCIATIVITY;
 static const double DIFF_THRESHOLD = 0.25;
 
-static const size_t ITERATIONS = 10'000'000;
+static const size_t ITERATIONS = 50'000'000;
 static const size_t BUFFER_MOD = 128;
 
 // memory buffer
-vector<size_t> buffer;
+vector<uint8_t> buffer;
 
 string prettify_bytes(size_t bytes) {
     const char *units[] = {"bytes", "Kb", "Mb", "Gb"};
@@ -54,13 +54,13 @@ vector<size_t> generate_permutation(size_t n) {
     return permutation;
 }
 
-size_t **prepare_pointer(size_t stride, size_t spots) {
+uint8_t **prepare_pointer(size_t stride, size_t spots) {
     vector<size_t> path = generate_permutation(spots);
 
-    size_t **pointer;
+    uint8_t **pointer;
     for (size_t i = 0; i < spots; ++i) {
         size_t index = path[i];
-        pointer = (size_t **) (&buffer[index * stride]);
+        pointer = (uint8_t **) (&buffer[index * stride]);
         size_t next_index = path[(i + 1) % spots];
         *pointer = &buffer[next_index * stride];
     }
@@ -69,12 +69,12 @@ size_t **prepare_pointer(size_t stride, size_t spots) {
 }
 
 int64_t run_experiment(size_t stride, size_t spots) {
-    size_t **pointer = prepare_pointer(stride, spots);
+    uint8_t **pointer = prepare_pointer(stride, spots);
 
     auto start = chrono::high_resolution_clock::now();
 //    int64_t tmp = 0;
     for (size_t i = 0; i < ITERATIONS; ++i) {
-        pointer = (size_t **) (*pointer);
+        pointer = (uint8_t **) (*pointer);
 //        tmp += **pointer;
     }
 //    if (tmp > ITERATIONS * BUFFER_MOD) cout << tmp; // never happens
@@ -85,12 +85,12 @@ int64_t run_experiment(size_t stride, size_t spots) {
 
 int main() {
     // init
-    buffer = vector<size_t>(MAX_MEMORY);
+    buffer = vector<uint8_t>(MAX_MEMORY);
     for (int i = 0; i < MAX_MEMORY; ++i) buffer[i] = i % BUFFER_MOD;
 
     // determine cache size & associativity
     vector<pair<size_t, set<int>>> jumps_log; // { way_size, jumps }
-    for (size_t way_size = 2; way_size < MAX_WAY_SIZE; way_size <<= 1) {
+    for (size_t way_size = 128; way_size < MAX_WAY_SIZE; way_size <<= 1) {
         log << "Times for way size " << prettify_bytes(way_size) << ":" << endl;
         set<int> jumps;
         int64_t previous_ns = -1;
@@ -144,7 +144,7 @@ int main() {
     jumps_log.clear();
     int64_t previous_ns = -1;
     size_t result_cache_line_size = -1;
-    for (size_t cache_line_size = 2; cache_line_size < 1024; cache_line_size <<= 1) {
+    for (size_t cache_line_size = 16; cache_line_size < 1024; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
         for (int spots = 1; spots <= 512; spots <<= 1) {
