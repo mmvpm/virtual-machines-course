@@ -10,7 +10,7 @@
 using namespace std;
 
 // debug logs
-const bool VERBOSE = false;
+const bool VERBOSE = true;
 #define log if (VERBOSE) cout
 
 // constants
