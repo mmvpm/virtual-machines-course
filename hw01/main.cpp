@@ -1,3 +1,5 @@
+#pragma GCC optimize("O3")
+
 #include <iostream>
 #include <vector>
 #include <numeric>
@@ -17,7 +19,7 @@ const bool VERBOSE = true;
 static const size_t MAX_MEMORY = 1 << 30; // 1 Gb
 static const int MAX_ASSOCIATIVITY = 16;
 static const int MAX_WAY_SIZE = MAX_MEMORY / MAX_ASSOCIATIVITY;
-static const double DIFF_THRESHOLD = 0.25;
+static const double DIFF_THRESHOLD = 0.2;
 
 static const size_t ITERATIONS = 50'000'000;
 static const size_t BUFFER_MOD = 128;
@@ -118,10 +120,10 @@ int main() {
 
     vector<pair<size_t, int>> possible_results; // { cache_size, associativity }
     set<int> max_way_jumps = jumps_log[jumps_log.size() - 1].second;
-    for (auto &[way_size, jumps]: jumps_log | views::reverse | views::drop(1)) {
+    for (auto &[way_size, jumps]: jumps_log) {
         vector<int> tmp;
         for (auto associativity: max_way_jumps) {
-            if (jumps.count(associativity) == 0) {
+            if (jumps.count(associativity) == 1) {
                 tmp.push_back(associativity);
                 possible_results.emplace_back(way_size * associativity, associativity);
             }
@@ -136,8 +138,7 @@ int main() {
     }
     log << endl;
 
-    size_t result_cache_size, result_associativity;
-    tie(result_cache_size, result_associativity) = *min_element(possible_results.begin(), possible_results.end());
+    auto &[result_cache_size, result_associativity] = *min_element(possible_results.begin(), possible_results.end());
 
     // determine cache line size
     set<int> previous_jumps;
