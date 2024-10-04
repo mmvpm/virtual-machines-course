@@ -9,7 +9,7 @@
 using namespace std;
 
 // debug logs
-const bool VERBOSE = true;
+const bool VERBOSE = false;
 #define log if (VERBOSE) cout
 
 // constants
@@ -22,7 +22,8 @@ static const size_t ITERATIONS = 50'000'000;
 static const size_t BUFFER_MOD = 128;
 
 // memory buffer
-vector<uint8_t> buffer;
+static const int PAGE_SIZE = 16384;
+alignas(PAGE_SIZE) vector<uint8_t> buffer;
 
 string prettify_bytes(size_t bytes) {
     const char *units[] = {"bytes", "Kb", "Mb", "Gb"};
@@ -134,10 +135,10 @@ int main() {
     jumps_log.clear();
     int64_t previous_ns = -1;
     size_t result_cache_line_size = -1;
-    for (size_t cache_line_size = 16; cache_line_size < 1024; cache_line_size <<= 1) {
+    for (size_t cache_line_size = 16; cache_line_size <= 1024; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
-        for (int spots = 1; spots <= 512; spots <<= 1) {
+        for (int spots = 4; spots <= 512; spots <<= 1) {
             int64_t current_ns = run_experiment(result_cache_size + cache_line_size, spots);
             double diff = (double) (current_ns - previous_ns) / (double) current_ns;
             log << "spots = " << spots << ", time = " << current_ns << " ns, diff = " << diff * 100 << "%" << endl;
