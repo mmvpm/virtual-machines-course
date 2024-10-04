@@ -9,7 +9,7 @@
 using namespace std;
 
 // debug logs
-const bool VERBOSE = true;
+const bool VERBOSE = false;
 #define log if (VERBOSE) cout
 
 // constants
@@ -152,7 +152,7 @@ int main() {
         log << endl;
 
         if (!previous_jumps.empty() && jumps != previous_jumps && previous_jumps.size() <= jumps.size()) {
-            result_cache_line_size = cache_line_size;
+            result_cache_line_size = cache_line_size >> 1; // previous one
             break;
         }
         previous_jumps = jumps;
