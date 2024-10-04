@@ -72,6 +72,8 @@ int64_t run_experiment(size_t stride, size_t spots) {
     }
     int64_t elapsed_ns = (chrono::high_resolution_clock::now() - start).count();
 
+    if (**pointer == 247) cout << "Never happens" << endl;
+
     return elapsed_ns;
 }
 
