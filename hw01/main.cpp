@@ -129,20 +129,18 @@ int main() {
     log << endl;
 
     auto &[result_cache_size, result_associativity] = *min_element(possible_results.begin(), possible_results.end());
-
-//    size_t result_cache_size = (2 << 15);
-//    int result_associativity = 8;
+    size_t result_way_size = result_cache_size / result_associativity;
 
     // determine cache line size
     set<int> previous_jumps;
     jumps_log.clear();
     int64_t previous_ns = -1;
     size_t result_cache_line_size = 0;
-    for (size_t cache_line_size = 32; cache_line_size <= 512; cache_line_size <<= 1) {
+    for (size_t cache_line_size = 32; cache_line_size <= 256; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
-        for (int spots = 4; spots <= 1024; spots <<= 1) {
-            int64_t current_ns = run_experiment(result_cache_size + cache_line_size, spots * result_associativity);
+        for (int spots = 4; spots <= 512; spots <<= 1) {
+            int64_t current_ns = run_experiment(result_way_size + cache_line_size, spots * result_associativity);
             double diff = (double) (current_ns - previous_ns) / (double) current_ns;
             log << "spots = " << spots << ", time = " << current_ns << " ns, diff = " << diff * 100 << "%" << endl;
             if (previous_ns != -1 && diff > DIFF_THRESHOLD) {
@@ -154,8 +152,8 @@ int main() {
         log << endl;
 
         if (!previous_jumps.empty() && jumps != previous_jumps && previous_jumps.size() <= jumps.size()) {
-            result_cache_line_size = cache_line_size >> 1; // previous one
-//            break;
+            result_cache_line_size = cache_line_size;
+            break;
         }
         previous_jumps = jumps;
     }
