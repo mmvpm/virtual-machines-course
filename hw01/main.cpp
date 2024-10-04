@@ -9,7 +9,7 @@
 using namespace std;
 
 // debug logs
-const bool VERBOSE = false;
+const bool VERBOSE = true;
 #define log if (VERBOSE) cout
 
 // constants
@@ -82,7 +82,7 @@ int main() {
 
     // determine cache size & associativity
     vector<pair<size_t, set<int>>> jumps_log; // { way_size, jumps }
-    for (size_t way_size = 128; way_size < MAX_WAY_SIZE; way_size <<= 1) {
+    for (size_t way_size = 1024; way_size < MAX_WAY_SIZE; way_size <<= 1) {
         log << "Times for way size " << prettify_bytes(way_size) << ":" << endl;
         set<int> jumps;
         int64_t previous_ns = -1;
@@ -130,20 +130,23 @@ int main() {
 
     auto &[result_cache_size, result_associativity] = *min_element(possible_results.begin(), possible_results.end());
 
+//    size_t result_cache_size = (2 << 15);
+//    int result_associativity = 8;
+
     // determine cache line size
     set<int> previous_jumps;
     jumps_log.clear();
     int64_t previous_ns = -1;
-    size_t result_cache_line_size = -1;
-    for (size_t cache_line_size = 16; cache_line_size <= 1024; cache_line_size <<= 1) {
+    size_t result_cache_line_size = 0;
+    for (size_t cache_line_size = 32; cache_line_size <= 512; cache_line_size <<= 1) {
         log << "Times for cache line " << prettify_bytes(cache_line_size) << ":" << endl;
         set<int> jumps;
-        for (int spots = 4; spots <= 512; spots <<= 1) {
-            int64_t current_ns = run_experiment(result_cache_size + cache_line_size, spots);
+        for (int spots = 4; spots <= 1024; spots <<= 1) {
+            int64_t current_ns = run_experiment(result_cache_size + cache_line_size, spots * result_associativity);
             double diff = (double) (current_ns - previous_ns) / (double) current_ns;
             log << "spots = " << spots << ", time = " << current_ns << " ns, diff = " << diff * 100 << "%" << endl;
             if (previous_ns != -1 && diff > DIFF_THRESHOLD) {
-                jumps.insert(spots);
+                jumps.insert(spots >> 1); // previous one
             }
             previous_ns = current_ns;
         }
@@ -152,7 +155,7 @@ int main() {
 
         if (!previous_jumps.empty() && jumps != previous_jumps && previous_jumps.size() <= jumps.size()) {
             result_cache_line_size = cache_line_size >> 1; // previous one
-            break;
+//            break;
         }
         previous_jumps = jumps;
     }
