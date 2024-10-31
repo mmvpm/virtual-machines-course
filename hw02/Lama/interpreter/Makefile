@@ -4,7 +4,7 @@ TARGET := main
 
 all: ${TARGET}
 
-${TARGET}: lama_runtime ${TARGET}.o
+${TARGET}: ${TARGET}.o | lama_runtime
 	gcc -O3 -g -m32 -fstack-protector-all $< ../runtime/runtime.a -o $@
 
 ${TARGET}.o: ${TARGET}.c
