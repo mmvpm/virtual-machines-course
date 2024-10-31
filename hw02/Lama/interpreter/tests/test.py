@@ -35,5 +35,5 @@ os.system(f'./{target} Sort.bc')
 print(f'[iterative] Elapsed time on "Sort.bc": {time.time() - start:.03f} seconds')
 
 start = time.time()
-os.system('echo "0" | lamac -i Sort.lama > /dev/null')
+os.system(f'echo "0" | {lamac} -i Sort.lama > /dev/null')
 print(f'[recursive] Elapsed time on "Sort.lama": {time.time() - start:.03f} seconds')

@@ -56,6 +56,14 @@ int cur_n_args = 0;
 int cur_n_locals = 0;
 bool cur_is_closure = false;
 
+/* Enums */
+
+enum { SCOPE_GLOBAL, SCOPE_LOCAL, SCOPE_ARGUMENT, SCOPE_CLOSURE };
+enum { BINOP, EXT_1, LD, LDA, ST, EXT_5, PATTERN, EXTERN };
+enum { CONST, TSTRING, TSEXP, STI, STA, JMP, END, RET, DROP, DUP, SWAP, ELEM };
+enum { CJMPZ, CJMPNZ, BEGIN, CBEGIN, CLOSUREOP, CALLC, CALL, TAG, ARRAY_KEY, FAILOP, LINE };
+enum { PLUS, MINUS, MULTIPLY, DIVIDE, MOD, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL, EQUAL, NOT_EQUAL, AND, OR };
+
 /* Gets a string from a string table by an index */
 char *get_string(int pos) {
   if (pos >= bf->stringtab_size) {
@@ -80,11 +88,10 @@ void read_file(char *fname) {
 
   int file_size = sizeof(int) * 4 + sizeof(char *) + (size = ftell(f));
   file = (bytefile *)malloc(file_size);
-  file->eobf = (char *)file + file_size;
-
   if (file == 0) {
     failure("*** FAILURE: unable to allocate memory.\n");
   }
+  file->eobf = (char *)file + file_size;
 
   rewind(f);
 
@@ -98,47 +105,46 @@ void read_file(char *fname) {
       &file->buffer[file->public_symbols_number * 2 * sizeof(int)];
   file->public_ptr = (int *)file->buffer;
   file->code_ptr = &file->string_ptr[file->stringtab_size];
-  file->global_ptr = (int *)malloc(file->global_area_size * sizeof(int));
 
   bf = file;
 }
 
 /* Stack pointer */
 
-extern size_t __gc_stack_top;
-extern size_t __gc_stack_bottom;
+extern int *__gc_stack_top;
+extern int *__gc_stack_bottom;
 
-int *sp() { return (int *)__gc_stack_top; }
+inline int *sp() { return __gc_stack_top; }
 
-void sp_assign(int new_sp) { *sp() = new_sp; }
+inline void sp_assign(int new_sp) { *sp() = new_sp; }
 
-void sp_add(int delta) { __gc_stack_top = (size_t)(sp() + delta); }
+inline void sp_add(int delta) { __gc_stack_top = sp() + delta; }
 
-int sp_peek() { return *(sp() + 1); }
+inline int sp_peek() { return *(sp() + 1); }
 
-void sp_push(int value) {
+inline void sp_push(int value) {
   sp_assign(value);
   sp_add(-1);
-  if ((size_t)sp() == __gc_stack_bottom - 1) {
+  if (sp() == __gc_stack_bottom - MEMORY_SIZE) {
     failure("ERROR: gc stack out of memory\n");
   }
 }
 
-void sp_push_unboxed(int value) { sp_push(BOX(value)); }
+inline void sp_push_unboxed(int value) { sp_push(BOX(value)); }
 
-int sp_pop() {
-  if ((size_t)sp() == __gc_stack_bottom - 1) {
+inline int sp_pop() {
+  if (sp() == global_area - 1) {
     failure("ERROR: try to pop from empty gc stack\n");
   }
   sp_add(1);
   return *sp();
 }
 
-int sp_pop_unboxed() { return UNBOX(sp_pop()); }
+inline int sp_pop_unboxed() { return UNBOX(sp_pop()); }
 
 /* Call stack */
 
-void call_stack_push(int value) {
+inline void call_stack_push(int value) {
   *call_stack_top = value;
   call_stack_top -= 1;
   if (call_stack_top <= call_stack) {
@@ -146,8 +152,8 @@ void call_stack_push(int value) {
   }
 }
 
-int call_stack_pop() {
-  if (call_stack_top > call_stack_bottom) {
+inline int call_stack_pop() {
+  if (call_stack_top >= call_stack_bottom - 1) {
     failure("ERROR: try to pop from empty call stack\n");
   }
   call_stack_top += 1;
@@ -156,21 +162,21 @@ int call_stack_pop() {
 
 /* Instruction pointer */
 
-void ip_assign(char *new_ip) {
+inline void ip_assign(char *new_ip) {
   if (!(bf->code_ptr <= new_ip && new_ip < bf->eobf)) {
     failure("ERROR: new ip out of bounds\n");
   }
   ip = new_ip;
 }
 
-char ip_next_byte() {
+inline unsigned char ip_next_byte() {
   if (ip + 1 >= bf->eobf) {
     failure("ERROR: ip out of bounds (ip + 1 >= eobf)\n");
   }
   return *ip++;
 }
 
-int ip_next_int() {
+inline int ip_next_int() {
   if (ip + sizeof(int) >= bf->eobf) {
     failure("ERROR: ip out of bounds (ip + %d >= eobf)\n", sizeof(int));
   }
@@ -185,25 +191,25 @@ int *var_addr(int scope, int i) {
   }
 
   switch (scope) {
-  case 0: // global
-    if ((size_t)(global_area + i) >= __gc_stack_bottom) {
+  case SCOPE_GLOBAL:
+    if (global_area + i >= __gc_stack_bottom) {
       failure("ERROR: global index variable out of bounds: %d\n", i);
     }
     return global_area + i;
 
-  case 1: // local
+  case SCOPE_LOCAL:
     if (i >= cur_n_locals) {
       failure("ERROR: local index variable out of bounds %d\n", i);
     }
     return fp - i;
 
-  case 2: // argument
+  case SCOPE_ARGUMENT:
     if (i >= cur_n_args) {
       failure("ERROR: argument index variable out of bounds\n", i);
     }
     return fp + cur_n_args - i;
 
-  case 3: // closure
+  case SCOPE_CLOSURE:
     int *closure_addr = (int *)fp[cur_n_args + 1];
     data *closure = TO_DATA(closure_addr);
 
@@ -223,84 +229,49 @@ int *var_addr(int scope, int i) {
 
 void run() {
 #define FAIL failure("ERROR: invalid opcode %d-%d\n", h, l)
+#define CASE_APPLY_BINOP(name, op) \
+        case name: \
+          sp_push_unboxed(a op b); \
+          break;
 
   ip = bf->code_ptr;
   do {
-    char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
+    unsigned char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
 
     switch (h) {
-    case 0: // BINOP
+    case BINOP:
       int b = sp_pop_unboxed();
       int a = sp_pop_unboxed();
       switch (l - 1) {
-      case 0: // PLUS
-        sp_push_unboxed(a + b);
-        break;
-
-      case 1: // MINUS
-        sp_push_unboxed(a - b);
-        break;
-
-      case 2: // MULTIPLY
-        sp_push_unboxed(a * b);
-        break;
-
-      case 3: // DIVIDE
-        sp_push_unboxed(a / b);
-        break;
-
-      case 4: // MOD
-        sp_push_unboxed(a % b);
-        break;
-
-      case 5: // LESS
-        sp_push_unboxed(a < b);
-        break;
-
-      case 6: // LESS_EQUAL
-        sp_push_unboxed(a <= b);
-        break;
-
-      case 7: // GREATER
-        sp_push_unboxed(a > b);
-        break;
-
-      case 8: // GREATER_EQUAL
-        sp_push_unboxed(a >= b);
-        break;
-
-      case 9: // EQUAL
-        sp_push_unboxed(a == b);
-        break;
-
-      case 10: // NOT_EQUAL
-        sp_push_unboxed(a != b);
-        break;
-
-      case 11: // AND
-        sp_push_unboxed(a && b);
-        break;
-
-      case 12: // OR
-        sp_push_unboxed(a || b);
-        break;
-
+      CASE_APPLY_BINOP(PLUS, +)
+      CASE_APPLY_BINOP(MINUS, -)
+      CASE_APPLY_BINOP(MULTIPLY, *)
+      CASE_APPLY_BINOP(DIVIDE, /)
+      CASE_APPLY_BINOP(MOD, %)
+      CASE_APPLY_BINOP(LESS, <)
+      CASE_APPLY_BINOP(LESS_EQUAL, <=)
+      CASE_APPLY_BINOP(GREATER, >)
+      CASE_APPLY_BINOP(GREATER_EQUAL, >=)
+      CASE_APPLY_BINOP(EQUAL, ==)
+      CASE_APPLY_BINOP(NOT_EQUAL, !=)
+      CASE_APPLY_BINOP(AND, &&)
+      CASE_APPLY_BINOP(OR, ||)
       default:
         FAIL;
       }
       break;
 
-    case 1: // EXT 1
+    case EXT_1:
       switch (l) {
-      case 0: // CONST
+      case CONST:
         sp_push_unboxed(ip_next_int());
         break;
 
-      case 1: // STRING
+      case TSTRING:
         sp_push((int)Bstring(get_string(ip_next_int())));
         break;
 
-      case 2: // SEXP
+      case TSEXP:
         char *tag = get_string(ip_next_int());
         int n = ip_next_int();
         sexp *sexp = alloc_sexp(n);
@@ -311,7 +282,7 @@ void run() {
         sp_push((int)((data *)sexp)->contents);
         break;
 
-      case 3: { // STI
+      case STI: {
         int val = sp_pop();
         int *ref = (int *)sp_pop();
         *ref = val;
@@ -319,7 +290,7 @@ void run() {
         break;
       }
 
-      case 4: { // STA
+      case STA: {
         int value = sp_pop();
         int i = sp_pop();
         if (UNBOXED(i)) {
@@ -332,12 +303,12 @@ void run() {
         break;
       }
 
-      case 5: // JMP
+      case JMP:
         ip_assign(bf->code_ptr + ip_next_int());
         break;
 
-      case 6: // END
-      case 7: // RET
+      case END:
+      case RET:
         int ret = sp_pop();
         sp_add(cur_n_args + cur_n_locals);
         if (call_stack_pop()) {
@@ -357,22 +328,22 @@ void run() {
 
         break;
 
-      case 8: // DROP
+      case DROP:
         sp_pop();
         break;
 
-      case 9: // DUP
+      case DUP:
         sp_push(sp_peek());
         break;
 
-      case 10: // SWAP
+      case SWAP:
         int top1 = sp_pop();
         int top2 = sp_pop();
         sp_push(top1);
         sp_push(top2);
         break;
 
-      case 11: // ELEM
+      case ELEM:
         int i = sp_pop();
         char *a = (char *)sp_pop();
         sp_push((int)Belem(a, i));
@@ -383,21 +354,21 @@ void run() {
       }
       break;
 
-    case 2: // LD
+    case LD:
       sp_push(*var_addr(l, ip_next_int()));
       break;
 
-    case 3: // LDA
+    case LDA:
       sp_push((int)var_addr(l, ip_next_int()));
       break;
 
-    case 4: // ST
+    case ST:
       *var_addr(l, ip_next_int()) = sp_peek();
       break;
 
-    case 5: // EXT 5
+    case EXT_5:
       switch (l) {
-      case 0: { // CJMPZ
+      case CJMPZ: {
         int next = ip_next_int();
         if (!sp_pop_unboxed()) { // condition
           ip_assign(bf->code_ptr + next);
@@ -405,7 +376,7 @@ void run() {
         break;
       }
 
-      case 1: { // CJMPNZ
+      case CJMPNZ: {
         int next = ip_next_int();
         if (sp_pop_unboxed()) { // condition
           ip_assign(bf->code_ptr + next);
@@ -413,8 +384,8 @@ void run() {
         break;
       }
 
-      case 2:   // BEGIN
-      case 3: { // CBEGIN
+      case BEGIN:  
+      case CBEGIN: {
         int n_args = ip_next_int();
         int n_locals = ip_next_int();
 
@@ -433,7 +404,7 @@ void run() {
         break;
       }
 
-      case 4: { // CLOSURE
+      case CLOSUREOP: {
         char *closure_addr = (char *)ip_next_int();
         int n = ip_next_int();
 
@@ -442,7 +413,7 @@ void run() {
 
         ((char **)closure_data->contents)[0] = closure_addr;
         for (int i = 1; i <= n; i++) {
-          char scope = ip_next_byte();
+          unsigned char scope = ip_next_byte();
           int var_i = ip_next_int();
           int *addr = var_addr(scope, var_i);
           ((int *)closure_data->contents)[i] = *addr;
@@ -454,7 +425,7 @@ void run() {
         break;
       }
 
-      case 5: { // CALLC
+      case CALLC: {
         int n_args = ip_next_int();
         int sp_closure_addr = sp()[n_args + 1];
         data *closure = TO_DATA(sp_closure_addr);
@@ -473,7 +444,7 @@ void run() {
         break;
       }
 
-      case 6: // CALL
+      case CALL:
         int func_addr = ip_next_int();
         ip_next_int(); // skip n_args
 
@@ -484,7 +455,7 @@ void run() {
 
         break;
 
-      case 7: // TAG
+      case TAG:
         void *sexp = (void *)sp_pop();
 
         char *tag = get_string(ip_next_int());
@@ -494,7 +465,7 @@ void run() {
 
         break;
 
-      case 8: // ARRAY_KEY
+      case ARRAY_KEY:
         void *data = (void *)sp_pop();
         int cap = BOX(ip_next_int());
 
@@ -502,12 +473,12 @@ void run() {
 
         break;
 
-      case 9: // FAIL
+      case FAILOP:
         int line = ip_next_int();
         int col = ip_next_byte();
         failure("Fail at %d:%d\n", line, col);
 
-      case 10: // LINE
+      case LINE:
         ip_next_int();
         break;
 
@@ -516,7 +487,7 @@ void run() {
       }
       break;
 
-    case 6: // PATTERN
+    case PATTERN:
       int addr = sp_pop();
 
       if (l != 5 /* val */ && UNBOXED(addr)) {
@@ -559,7 +530,7 @@ void run() {
       }
       break;
 
-    case 7: // EXTERN
+    case EXTERN:
       switch (l) {
       case 0: // read
         sp_push(Lread());
@@ -607,12 +578,21 @@ int main(int argc, char *argv[]) {
 
   read_file(argv[1]);
 
-  __gc_init();
-  __gc_stack_bottom = (size_t)call_stack + MEMORY_SIZE;
-  global_area = (int *)__gc_stack_bottom - bf->global_area_size;
-  __gc_stack_top = (size_t)(global_area - 1);
+  // Init memory layout:
+  //
+  //     <--                MEMORY_SIZE                  -->
+  //     [ - - - - - - - - - - - - - - - - - - - - - - - - ]
+  //     ^                        ^ ^                     ^ ^
+  //     |                       /   \                   /  |
+  // call_stack    __gc_stack_top     global_area       /  __gc_stack_bottom
+  //                                      call_stack_top   call_stack_bottom
 
-  call_stack_top = (int *)call_stack_bottom - 1;
+  __gc_init();
+  __gc_stack_bottom = (int *)((size_t)call_stack + MEMORY_SIZE);
+  global_area = __gc_stack_bottom - bf->global_area_size;
+  __gc_stack_top = global_area - 1;
+
+  call_stack_top = call_stack_bottom - 1;
 
   for (int i = 0; i < bf->global_area_size; i++) {
     global_area[i] = BOX(0);
