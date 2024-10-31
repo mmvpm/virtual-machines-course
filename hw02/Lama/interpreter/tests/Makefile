@@ -1,14 +1,14 @@
-.PHONY: all run_tests clean
+.PHONY: all run_tests interpreter regression clean
 
 all: run_tests
 
-run_tests: .. | ../../regression
+run_tests: interpreter regression
 	python3 test.py
 
-..:
+interpreter:
 	make -C ..
 
-../../regression:
+regression:
 	make -C ../../regression
 
 clean:

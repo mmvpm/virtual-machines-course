@@ -6,4 +6,11 @@
 
 ## Решение
 
-todo
+[interpreter/main.c](Lama/interpreter/main.c)
+
+Запустить тесты корректности и производительности:
+
+```bash
+cd Lama/interpreter
+make tests
+```
