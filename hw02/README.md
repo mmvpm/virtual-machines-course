@@ -6,9 +6,13 @@
 
 ## Решение
 
-[interpreter/main.c](Lama/interpreter/main.c)
+Код интерпретатора: [interpreter/main.c](Lama/interpreter/main.c)
 
-Запустить тесты корректности и производительности:
+Запуск тестов корректности и производительности: [interpreter/tests/test.py](Lama/interpreter/tests/test.py). Скрипт запускает написанный интерпретатор на тестах из каталога [/regression](Lama/regression), а также меряет время его работы на файле [Sort.bc](Lama/interpreter/tests/Sort.bc) (байткод исходника [Sort.lama](Lama/interpreter/tests/Sort.lama))
+
+## Запуск тестов
+
+Перед запуском тестов нужно выполнить [инструкции по сборке самой Lama](https://github.com/PLTools/Lama)
 
 ```bash
 cd Lama/interpreter
@@ -16,7 +20,7 @@ make tests
 ```
 
 <details>
-<summary>stdout</summary>
+<summary>full stdout</summary>
 
 ```
 mmvpm@compute-vm-2-4-20-ssd-1730209407248:~/virtual-machines-course/hw02/Lama/interpreter$ make tests
@@ -31,8 +35,14 @@ test002 passed
 <... omitted ...>
 test110 passed
 Regression tests passed!
-Elapsed time on "Sort.bc": 3.097 seconds
+[iterative] Elapsed time on "Sort.bc": 3.151 seconds
+[recursive] Elapsed time on "Sort.lama": 6.315 seconds
 make[1]: Leaving directory '/home/mmvpm/virtual-machines-course/hw02/Lama/interpreter/tests'
 ```
 
 </details>
+
+## Производительность
+
+Итеративный интерпретатор: 3.151 seconds
+Рекурсивный интерпретатор: 6.315 seconds
