@@ -44,5 +44,5 @@ make[1]: Leaving directory '/home/mmvpm/virtual-machines-course/hw02/Lama/interp
 
 ## Производительность
 
-Итеративный интерпретатор: 3.151 seconds
-Рекурсивный интерпретатор: 6.315 seconds
+- Итеративный интерпретатор: 3.151 seconds
+- Рекурсивный интерпретатор: 6.315 seconds
