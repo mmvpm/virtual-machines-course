@@ -1,0 +1,35 @@
+opam-version: "2.0"
+version: "1.2"
+
+synopsis:    "Lama programming language"
+maintainer:  "dboulytchev@gmail.com"
+authors:     [
+  "Dmitry Boulytchev <dboulytchev@gmail.com>"
+  "Daniil Berezun <danya.berezun@gmail.com>"
+  "Egor Sheremetov <egor.sheremetov.dev@gmail.com>"
+]
+homepage:    "https://github.com/PLTools/Lama"
+bug-reports: "https://github.com/PLTools/Lama/issues"
+
+depends: [
+  "ocaml"       { >= "4.13.1" }
+  "ocamlfind"   { build }
+  "camlp5"      { >= "8.00.05" }
+  "ostap"       { >= "0.5"}
+  "GT"          { >= "0.5.1" }
+]
+
+build: [
+  [make]
+  [make "regression-all"] {with-test}
+]
+install: [make "install"]
+
+depexts: [
+  ["gcc-multilib"] {os-family = "debian"}
+]
+
+dev-repo: "git+https://github.com/PLTools/Lama.git"
+url {
+  src: "git+https://github.com/PLTools/Lama.git#1.20"
+}
