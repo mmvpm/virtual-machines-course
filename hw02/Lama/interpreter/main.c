@@ -41,20 +41,20 @@ typedef struct {
 /* Bytefile to interpret */
 bytefile *bf;
 
-#define MEMORY_SIZE (1 << 20) // 1 Mb
+#define MEMORY_SIZE (1 << 20)
 
-int call_stack[MEMORY_SIZE];
-int *call_stack_top;
-int *call_stack_bottom = call_stack + MEMORY_SIZE;
+static int call_stack[MEMORY_SIZE]; // 4 Mb
+static int *call_stack_top;
+static int *call_stack_bottom = call_stack + MEMORY_SIZE;
 
-int *global_area;
+static int *global_area;
 
-char *ip;
-int *fp;
+static char *ip;
+static int *fp;
 
-int cur_n_args = 0;
-int cur_n_locals = 0;
-bool cur_is_closure = false;
+static int cur_n_args = 0;
+static int cur_n_locals = 0;
+static bool cur_is_closure = false;
 
 /* Enums */
 
@@ -65,7 +65,7 @@ enum { CJMPZ, CJMPNZ, BEGIN, CBEGIN, CLOSUREOP, CALLC, CALL, TAG, ARRAY_KEY, FAI
 enum { PLUS, MINUS, MULTIPLY, DIVIDE, MOD, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL, EQUAL, NOT_EQUAL, AND, OR };
 
 /* Gets a string from a string table by an index */
-char *get_string(int pos) {
+static char *get_string(int pos) {
   if (pos >= bf->stringtab_size) {
     failure("ERROR: index out of bounds of string pool\n");
   }
@@ -73,7 +73,7 @@ char *get_string(int pos) {
 }
 
 /* Reads a binary bytecode file by name and unpacks it */
-void read_file(char *fname) {
+static void read_file(char *fname) {
   FILE *f = fopen(fname, "rb");
   long size;
   bytefile *file;
@@ -114,25 +114,25 @@ void read_file(char *fname) {
 extern int *__gc_stack_top;
 extern int *__gc_stack_bottom;
 
-inline int *sp() { return __gc_stack_top; }
+static inline int *sp() { return __gc_stack_top; }
 
-inline void sp_assign(int new_sp) { *sp() = new_sp; }
+static inline void sp_assign(int new_sp) { *sp() = new_sp; }
 
-inline void sp_add(int delta) { __gc_stack_top = sp() + delta; }
+static inline void sp_add(int delta) { __gc_stack_top = sp() + delta; }
 
-inline int sp_peek() { return *(sp() + 1); }
+static inline int sp_peek() { return *(sp() + 1); }
 
-inline void sp_push(int value) {
+static inline void sp_push(int value) {
   sp_assign(value);
   sp_add(-1);
-  if (sp() == __gc_stack_bottom - MEMORY_SIZE) {
+  if (sp() == call_stack) {
     failure("ERROR: gc stack out of memory\n");
   }
 }
 
-inline void sp_push_unboxed(int value) { sp_push(BOX(value)); }
+static inline void sp_push_unboxed(int value) { sp_push(BOX(value)); }
 
-inline int sp_pop() {
+static inline int sp_pop() {
   if (sp() == global_area - 1) {
     failure("ERROR: try to pop from empty gc stack\n");
   }
@@ -140,11 +140,11 @@ inline int sp_pop() {
   return *sp();
 }
 
-inline int sp_pop_unboxed() { return UNBOX(sp_pop()); }
+static inline int sp_pop_unboxed() { return UNBOX(sp_pop()); }
 
 /* Call stack */
 
-inline void call_stack_push(int value) {
+static inline void call_stack_push(int value) {
   *call_stack_top = value;
   call_stack_top -= 1;
   if (call_stack_top <= call_stack) {
@@ -152,7 +152,7 @@ inline void call_stack_push(int value) {
   }
 }
 
-inline int call_stack_pop() {
+static inline int call_stack_pop() {
   if (call_stack_top >= call_stack_bottom - 1) {
     failure("ERROR: try to pop from empty call stack\n");
   }
@@ -162,21 +162,21 @@ inline int call_stack_pop() {
 
 /* Instruction pointer */
 
-inline void ip_assign(char *new_ip) {
+static inline void ip_assign(char *new_ip) {
   if (!(bf->code_ptr <= new_ip && new_ip < bf->eobf)) {
     failure("ERROR: new ip out of bounds\n");
   }
   ip = new_ip;
 }
 
-inline unsigned char ip_next_byte() {
+static inline unsigned char ip_next_byte() {
   if (ip + 1 >= bf->eobf) {
     failure("ERROR: ip out of bounds (ip + 1 >= eobf)\n");
   }
   return *ip++;
 }
 
-inline int ip_next_int() {
+static inline int ip_next_int() {
   if (ip + sizeof(int) >= bf->eobf) {
     failure("ERROR: ip out of bounds (ip + %d >= eobf)\n", sizeof(int));
   }
@@ -185,7 +185,7 @@ inline int ip_next_int() {
 
 /* Utils */
 
-int *var_addr(int scope, int i) {
+static int *var_addr(int scope, int i) {
   if (i < 0) {
     failure("ERROR: index < 0 while var_addr(%d, %d)", scope, i);
   }
@@ -227,7 +227,7 @@ int *var_addr(int scope, int i) {
 
 /* Main loop */
 
-void run() {
+static void run() {
 #define FAIL failure("ERROR: invalid opcode %d-%d\n", h, l)
 #define CASE_APPLY_BINOP(name, op) \
         case name: \
