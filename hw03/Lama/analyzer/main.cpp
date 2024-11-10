@@ -5,7 +5,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 /* Enums */
@@ -56,6 +56,10 @@ static inline int ip_next_int() {
     throw std::runtime_error("ERROR: ip out of bounds (ip + sizeof(int) >= eobf)");
   }
   return (ip += sizeof(int), *(int *)(ip - sizeof(int)));
+}
+
+static inline int ip_int() {
+  return *((int *)ip);
 }
 
 static inline std::string ip_next_int_str() {
@@ -147,11 +151,16 @@ const std::vector<std::string> binops = { "+", "-", "*", "/", "%", "<", "<=", ">
 
 #define INVALID_OPCODE throw std::runtime_error("ERROR: invalid opcode " + std::to_string(h) + " " + std::to_string(l));
 
-static bool move_next(const std::function<void(const std::string&)>& process) {
+static char* move_next(const std::function<void(const std::string&)>& process) {
   unsigned char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
 
+  char* addr = nullptr;
+  if (h == EXT_1 && l == JMP || h == EXT_5 && (l == CJMPZ || l == CJMPNZ || l == CALLC || l == CALL)) {
+    addr = bf->code_ptr + ip_int();
+  }
+
   switch (h) {
-  case STOP:    return false;
+  case STOP:    return nullptr;
   case BINOP:   process("BINOP " + binops[l - 1]); break;
   case LD:      process("LD " + get_scope(l) + " " + ip_next_int_str()); break;
   case LDA:     process("LDA " + get_scope(l) + " " + ip_next_int_str()); break;
@@ -166,8 +175,8 @@ static bool move_next(const std::function<void(const std::string&)>& process) {
     case STI:     process("STI"); break;
     case STA:     process("STA"); break;
     case JMP:     process("JMP " + ip_next_int_str()); break;
-    case END:     process("END"); break;
-    case RET:     process("RET"); break;
+    case END:     process("END"); return nullptr;
+    case RET:     process("RET"); return nullptr;
     case DROP:    process("DROP"); break;
     case DUP:     process("DUP"); break;
     case SWAP:    process("SWAP"); break;
@@ -206,31 +215,19 @@ static bool move_next(const std::function<void(const std::string&)>& process) {
 
   default: INVALID_OPCODE;
   }
-  return true;
+  return addr ? addr : ip;
 }
 
 /* Hashing bytes */
 
 struct ByteRange {
   const char* start;
-  const char* end;
+  char len;
 
-  bool operator==(const ByteRange& other) const {
-    return (end - start == other.end - other.start) && std::memcmp(start, other.start, end - start) == 0;
+  bool operator<(const ByteRange& other) const {
+    return len < other.len || len == other.len && std::memcmp(start, other.start, len) < 0;
   }
-};
-
-namespace std {
-  template<> struct hash<ByteRange> {
-    size_t operator()(const ByteRange& range) const {
-      size_t hash = 0;
-      for (const char* ptr = range.start; ptr != range.end; ++ptr) {
-        hash = (hash * 31) ^ (size_t)(*ptr);
-      }
-      return hash;
-    }
-  };
-}
+} __attribute__((packed));
 
 /* Main loop */
 
@@ -239,31 +236,55 @@ int main(int argc, char *argv[]) {
     throw std::runtime_error("ERROR: no bytecode file\n");
   }
   read_file(argv[1]);
-  ip = bf->code_ptr;
 
-  char* prev_ip = nullptr;
-  std::unordered_map<ByteRange, int> freq;
+  std::map<ByteRange, int> freq;
+  std::vector<bool> visited(bf->eobf - ip + 1, false);
+
+  std::vector<std::pair<char*, char*>> cur_ip_stack;
+  cur_ip_stack.push_back(std::make_pair(nullptr, bf->code_ptr));
 
   auto noop = [](const std::string& decoded) {};
   auto print = [](const std::string& decoded) { std::cout << decoded; };
 
-  while (true) {
-    char* current_ip = ip;
-    if (!move_next(noop)) break;
+  while (!cur_ip_stack.empty()) {
+    auto [prev_ip, current_ip] = cur_ip_stack.back();
+    cur_ip_stack.pop_back();
+  
+    if (visited[current_ip - bf->code_ptr]) continue;
+    visited[current_ip - bf->code_ptr] = true;
 
-    freq[ByteRange{current_ip, ip}]++;
-    if (prev_ip) freq[ByteRange{prev_ip, ip}]++;
+    ip = current_ip;
+    char* next_ip = move_next(noop);
 
-    prev_ip = current_ip;
+    freq[ByteRange{current_ip, (char)(ip - current_ip)}]++;
+    if (prev_ip && next_ip) {
+      freq[ByteRange{prev_ip, (char)(ip - prev_ip)}]++;
+    }
+
+    if (!next_ip) continue;
+    
+    if (ip != next_ip) {
+      cur_ip_stack.push_back(std::make_pair(nullptr, next_ip));
+    }
+    cur_ip_stack.push_back(std::make_pair(current_ip, ip));
   }
 
-  std::vector<std::pair<ByteRange, int>> sorted_freq(freq.begin(), freq.end());
-  std::sort(sorted_freq.begin(), sorted_freq.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+  std::vector<std::map<ByteRange, int>::iterator> sorted_freq;
+  for (auto it = freq.begin(); it != freq.end(); ++it) {
+      sorted_freq.push_back(it);
+  }
+  std::sort(sorted_freq.begin(), sorted_freq.end(), [](auto lhs, auto rhs) {
+      return lhs->second > rhs->second;
+  });
 
-  for (const auto& [range, frequency] : sorted_freq) {
+  for (auto it : sorted_freq) {
+    char* range_start = (char *)(it->first.start);
+    char range_len = it->first.len;
+    int frequency = it->second;
+
     std::cout << frequency << " times: ";
-    ip = (char *)range.start;
-    while (ip < range.end) {
+    ip = (char *)range_start;
+    while (ip < range_start + range_len) {
       move_next(print);
       std::cout << "; ";
     }
