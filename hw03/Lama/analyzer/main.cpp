@@ -151,16 +151,18 @@ const std::vector<std::string> binops = { "+", "-", "*", "/", "%", "<", "<=", ">
 
 #define INVALID_OPCODE throw std::runtime_error("ERROR: invalid opcode " + std::to_string(h) + " " + std::to_string(l));
 
-static char* move_next(const std::function<void(const std::string&)>& process) {
+static std::pair<std::vector<char*>, bool> move_next(const std::function<void(const std::string&)>& process) {
   unsigned char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
 
-  char* addr = nullptr;
-  if (h == EXT_1 && l == JMP || h == EXT_5 && (l == CJMPZ || l == CJMPNZ || l == CALLC || l == CALL)) {
-    addr = bf->code_ptr + ip_int();
+  bool one_way = h == EXT_1 && l == JMP;
+  bool two_ways = h == EXT_5 && (l == CJMPZ || l == CJMPNZ || l == CALLC || l == CALL);
+  std::vector<char*> addr;
+  if (one_way || two_ways) {
+    addr.push_back(bf->code_ptr + ip_int());
   }
 
   switch (h) {
-  case STOP:    return nullptr;
+  case STOP:    return std::make_pair(addr, true);
   case BINOP:   process("BINOP " + binops[l - 1]); break;
   case LD:      process("LD " + get_scope(l) + " " + ip_next_int_str()); break;
   case LDA:     process("LDA " + get_scope(l) + " " + ip_next_int_str()); break;
@@ -175,8 +177,8 @@ static char* move_next(const std::function<void(const std::string&)>& process) {
     case STI:     process("STI"); break;
     case STA:     process("STA"); break;
     case JMP:     process("JMP " + ip_next_int_str()); break;
-    case END:     process("END"); return nullptr;
-    case RET:     process("RET"); return nullptr;
+    case END:     process("END"); return std::make_pair(addr, true);
+    case RET:     process("RET"); return std::make_pair(addr, true);
     case DROP:    process("DROP"); break;
     case DUP:     process("DUP"); break;
     case SWAP:    process("SWAP"); break;
@@ -215,17 +217,30 @@ static char* move_next(const std::function<void(const std::string&)>& process) {
 
   default: INVALID_OPCODE;
   }
-  return addr ? addr : ip;
+  
+  if (two_ways) {
+    addr.push_back(ip);
+  }
+
+  return std::make_pair(addr, false);
 }
 
-/* Hashing bytes */
+/* Byte range [start, start + len) */
 
 struct ByteRange {
   const char* start;
   char len;
+  int frequency;
+
+  ByteRange() {}
+  ByteRange(char* start, char len): start(start), len(len), frequency(0) {}
 
   bool operator<(const ByteRange& other) const {
     return len < other.len || len == other.len && std::memcmp(start, other.start, len) < 0;
+  }
+
+  bool operator!=(const ByteRange& other) const {
+    return len != other.len || len == other.len && std::memcmp(start, other.start, len) != 0;
   }
 } __attribute__((packed));
 
@@ -237,54 +252,78 @@ int main(int argc, char *argv[]) {
   }
   read_file(argv[1]);
 
-  std::map<ByteRange, int> freq;
+  std::vector<ByteRange> ranges;
   std::vector<bool> visited(bf->eobf - ip + 1, false);
 
-  std::vector<std::pair<char*, char*>> cur_ip_stack;
-  cur_ip_stack.push_back(std::make_pair(nullptr, bf->code_ptr));
+  std::vector<char*> cur_ip_stack;
+  cur_ip_stack.push_back(bf->code_ptr);
 
   auto noop = [](const std::string& decoded) {};
   auto print = [](const std::string& decoded) { std::cout << decoded; };
 
+  char* prev_ip = nullptr;
   while (!cur_ip_stack.empty()) {
-    auto [prev_ip, current_ip] = cur_ip_stack.back();
+    char* current_ip = cur_ip_stack.back();
     cur_ip_stack.pop_back();
   
     if (visited[current_ip - bf->code_ptr]) continue;
     visited[current_ip - bf->code_ptr] = true;
 
     ip = current_ip;
-    char* next_ip = move_next(noop);
+    auto [next_ips, should_stop] = move_next(noop);
 
-    freq[ByteRange{current_ip, (char)(ip - current_ip)}]++;
-    if (prev_ip && next_ip) {
-      freq[ByteRange{prev_ip, (char)(ip - prev_ip)}]++;
+    ranges.emplace_back(current_ip, (char)(ip - current_ip));
+
+    if (should_stop) {
+      prev_ip = nullptr;
+      continue;
     }
 
-    if (!next_ip) continue;
-    
-    if (ip != next_ip) {
-      cur_ip_stack.push_back(std::make_pair(nullptr, next_ip));
+    if (prev_ip) {
+      ranges.emplace_back(prev_ip, (char)(ip - prev_ip));
     }
-    cur_ip_stack.push_back(std::make_pair(current_ip, ip));
+
+    switch (next_ips.size()) {
+    case 0:
+      prev_ip = current_ip;
+      cur_ip_stack.push_back(ip);
+      break;
+    case 1:
+      prev_ip = nullptr;
+      cur_ip_stack.push_back(next_ips[0]);
+      break;
+    case 2:
+      prev_ip = nullptr;
+      cur_ip_stack.push_back(next_ips[0]);
+      cur_ip_stack.push_back(next_ips[1]);
+      break;
+    default:
+      throw std::runtime_error("ERROR: unexpected next_ips size: " + std::to_string(next_ips.size()));
+    }
   }
 
-  std::vector<std::map<ByteRange, int>::iterator> sorted_freq;
-  for (auto it = freq.begin(); it != freq.end(); ++it) {
-      sorted_freq.push_back(it);
+  std::stable_sort(ranges.begin(), ranges.end());
+
+  size_t last_index_with_freq = -1;
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    if (i == 0 || ranges[i] != ranges[i - 1]) {
+      last_index_with_freq++;
+      ranges[last_index_with_freq] = ranges[i];
+      ranges[last_index_with_freq].frequency = 1;
+    } else {
+      ranges[last_index_with_freq].frequency++;
+    }
   }
-  std::sort(sorted_freq.begin(), sorted_freq.end(), [](auto lhs, auto rhs) {
-      return lhs->second > rhs->second;
+  ranges.resize(last_index_with_freq + 1);
+
+  std::stable_sort(ranges.begin(), ranges.end(), [](auto left, auto right) { 
+    return left.frequency > right.frequency;
   });
 
-  for (auto it : sorted_freq) {
-    char* range_start = (char *)(it->first.start);
-    char range_len = it->first.len;
-    int frequency = it->second;
-
-    std::cout << frequency << " times: ";
-    ip = (char *)range_start;
-    while (ip < range_start + range_len) {
+  for (auto& range : ranges) {
+    std::cout << range.frequency << " times: ";
+    ip = (char *)range.start;
+    while (ip < range.start + range.len) {
       move_next(print);
       std::cout << "; ";
     }
