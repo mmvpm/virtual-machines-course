@@ -151,7 +151,7 @@ const std::vector<std::string> binops = { "+", "-", "*", "/", "%", "<", "<=", ">
 
 #define INVALID_OPCODE throw std::runtime_error("ERROR: invalid opcode " + std::to_string(h) + " " + std::to_string(l));
 
-static std::pair<std::vector<char*>, bool> move_next(const std::function<void(const std::string&)>& process) {
+static std::vector<char*> move_next(const std::function<void(const std::string&)>& process) {
   unsigned char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
 
   bool one_way = h == EXT_1 && l == JMP;
@@ -162,7 +162,7 @@ static std::pair<std::vector<char*>, bool> move_next(const std::function<void(co
   }
 
   switch (h) {
-  case STOP:    return std::make_pair(addr, true);
+  case STOP:    return addr;
   case BINOP:   process("BINOP " + binops[l - 1]); break;
   case LD:      process("LD " + get_scope(l) + " " + ip_next_int_str()); break;
   case LDA:     process("LDA " + get_scope(l) + " " + ip_next_int_str()); break;
@@ -177,8 +177,8 @@ static std::pair<std::vector<char*>, bool> move_next(const std::function<void(co
     case STI:     process("STI"); break;
     case STA:     process("STA"); break;
     case JMP:     process("JMP " + ip_next_int_str()); break;
-    case END:     process("END"); return std::make_pair(addr, true);
-    case RET:     process("RET"); return std::make_pair(addr, true);
+    case END:     process("END"); return addr;
+    case RET:     process("RET"); return addr;
     case DROP:    process("DROP"); break;
     case DUP:     process("DUP"); break;
     case SWAP:    process("SWAP"); break;
@@ -218,11 +218,11 @@ static std::pair<std::vector<char*>, bool> move_next(const std::function<void(co
   default: INVALID_OPCODE;
   }
   
-  if (two_ways) {
+  if (!one_way) {
     addr.push_back(ip);
   }
 
-  return std::make_pair(addr, false);
+  return addr;
 }
 
 /* Byte range [start, start + len) */
@@ -254,52 +254,61 @@ int main(int argc, char *argv[]) {
 
   std::vector<ByteRange> ranges;
   std::vector<bool> visited(bf->eobf - ip + 1, false);
-
+  std::vector<bool> marked(bf->eobf - ip + 1, false);
   std::vector<char*> cur_ip_stack;
-  cur_ip_stack.push_back(bf->code_ptr);
+
+  for (int i = 0; i < bf->public_symbols_number; i++) {
+    int offset = bf->public_ptr[i * 2 + 1];
+    cur_ip_stack.push_back(bf->code_ptr + offset);
+    marked[offset] = true;
+  }
 
   auto noop = [](const std::string& decoded) {};
   auto print = [](const std::string& decoded) { std::cout << decoded; };
 
-  char* prev_ip = nullptr;
   while (!cur_ip_stack.empty()) {
-    char* current_ip = cur_ip_stack.back();
+    ip = cur_ip_stack.back();
     cur_ip_stack.pop_back();
   
-    if (visited[current_ip - bf->code_ptr]) continue;
-    visited[current_ip - bf->code_ptr] = true;
+    if (visited[ip - bf->code_ptr]) continue;
+    visited[ip - bf->code_ptr] = true;
 
-    ip = current_ip;
-    auto [next_ips, should_stop] = move_next(noop);
-
-    ranges.emplace_back(current_ip, (char)(ip - current_ip));
-
-    if (should_stop) {
-      prev_ip = nullptr;
-      continue;
-    }
-
-    if (prev_ip) {
-      ranges.emplace_back(prev_ip, (char)(ip - prev_ip));
-    }
+    std::vector<char*> next_ips = move_next(noop);
 
     switch (next_ips.size()) {
     case 0:
-      prev_ip = current_ip;
-      cur_ip_stack.push_back(ip);
       break;
     case 1:
-      prev_ip = nullptr;
       cur_ip_stack.push_back(next_ips[0]);
+      if (next_ips[0] != ip) { // JMP
+        marked[next_ips[0] - bf->code_ptr] = true;
+      }
       break;
     case 2:
-      prev_ip = nullptr;
       cur_ip_stack.push_back(next_ips[0]);
       cur_ip_stack.push_back(next_ips[1]);
+      marked[next_ips[0] - bf->code_ptr] = true;
+      marked[next_ips[1] - bf->code_ptr] = true;
       break;
     default:
       throw std::runtime_error("ERROR: unexpected next_ips size: " + std::to_string(next_ips.size()));
     }
+  }
+
+  char* prev_ip = nullptr;
+  for (size_t i = 0; i < visited.size(); ++i) {
+    if (!visited[i]) continue;
+
+    char* current_ip = bf->code_ptr + i;
+    ip = current_ip;
+    move_next(noop);
+    
+    ranges.emplace_back(current_ip, (char)(ip - current_ip));
+    if (prev_ip && !marked[i]) {
+      ranges.emplace_back(prev_ip, (char)(ip - prev_ip));
+    }
+    
+    prev_ip = current_ip;
   }
 
   std::stable_sort(ranges.begin(), ranges.end());

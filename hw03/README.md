@@ -30,13 +30,13 @@ make
 11 times: DROP; DUP; 
 11 times: DUP; CONST 1; 
 10 times: DROP; DROP; 
-8 times: CONST 0; ELEM; 
 8 times: LD arg 0; 
-7 times: DUP; CONST 0; 
+8 times: CONST 0; ELEM; 
 7 times: ELEM; DROP; 
+7 times: DUP; CONST 0; 
 6 times: END; 
-4 times: JMP 776; 
 4 times: DUP; DUP; 
+4 times: JMP 776; 
 4 times: SEXP cons 2; 
 3 times: JMP 350; 
 3 times: LD local 0; 
@@ -63,6 +63,7 @@ make
 2 times: DUP; TAG cons 2; 
 2 times: SEXP cons 2; CALL Larray 2; 
 1 times: BINOP >; 
+1 times: BINOP -; END; 
 1 times: DUP; DROP; 
 1 times: ELEM; DUP; 
 1 times: CONST 1000; 
