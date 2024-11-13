@@ -1,11 +1,14 @@
 /* Lama SM Bytecode static analyzer */
 
+#include "trie.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <functional>
 #include <iostream>
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 
 /* Enums */
@@ -31,7 +34,7 @@ typedef struct {
 } bytefile;
 
 /* Bytefile to interpret */
-bytefile *bf;
+static bytefile *bf;
 
 /* Gets a string from a string table by an index */
 static inline std::string get_string(int pos) {
@@ -45,16 +48,10 @@ static inline std::string get_string(int pos) {
 static char *ip;
 
 static inline unsigned char ip_next_byte() {
-  if (ip + 1 > bf->eobf) {
-    throw std::runtime_error("ERROR: ip out of bounds (ip + 1 >= eobf)");
-  }
   return *ip++;
 }
 
 static inline int ip_next_int() {
-  if (ip + sizeof(int) >= bf->eobf) {
-    throw std::runtime_error("ERROR: ip out of bounds (ip + sizeof(int) >= eobf)");
-  }
   return (ip += sizeof(int), *(int *)(ip - sizeof(int)));
 }
 
@@ -146,8 +143,8 @@ static inline std::string handle_closure() {
 
 /* Moves ip to the next instruction and decodes it */
 
-const std::vector<std::string> patterns = { "=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun" };
-const std::vector<std::string> binops = { "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "||" };
+static const std::string patterns[] = { "=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun" };
+static const std::string binops[] = { "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "||" };
 
 #define INVALID_OPCODE throw std::runtime_error("ERROR: invalid opcode " + std::to_string(h) + " " + std::to_string(l));
 
@@ -162,7 +159,7 @@ static std::vector<char*> move_next(const std::function<void(const std::string&)
   }
 
   switch (h) {
-  case STOP:    return addr;
+  case STOP:    process("STOP"); return addr;
   case BINOP:   process("BINOP " + binops[l - 1]); break;
   case LD:      process("LD " + get_scope(l) + " " + ip_next_int_str()); break;
   case LDA:     process("LDA " + get_scope(l) + " " + ip_next_int_str()); break;
@@ -225,25 +222,6 @@ static std::vector<char*> move_next(const std::function<void(const std::string&)
   return addr;
 }
 
-/* Byte range [start, start + len) */
-
-struct ByteRange {
-  const char* start;
-  char len;
-  int frequency;
-
-  ByteRange() {}
-  ByteRange(char* start, char len): start(start), len(len), frequency(0) {}
-
-  bool operator<(const ByteRange& other) const {
-    return len < other.len || len == other.len && std::memcmp(start, other.start, len) < 0;
-  }
-
-  bool operator!=(const ByteRange& other) const {
-    return len != other.len || len == other.len && std::memcmp(start, other.start, len) != 0;
-  }
-} __attribute__((packed));
-
 /* Main loop */
 
 int main(int argc, char *argv[]) {
@@ -252,13 +230,16 @@ int main(int argc, char *argv[]) {
   }
   read_file(argv[1]);
 
-  std::vector<ByteRange> ranges;
+  Trie trie;
   std::vector<bool> visited(bf->eobf - ip + 1, false);
   std::vector<bool> marked(bf->eobf - ip + 1, false);
   std::vector<char*> cur_ip_stack;
 
+  std::set<int> start_offsets;
   for (int i = 0; i < bf->public_symbols_number; i++) {
-    int offset = bf->public_ptr[i * 2 + 1];
+    start_offsets.insert(bf->public_ptr[i * 2 + 1]);
+  }
+  for (int offset : start_offsets) {
     cur_ip_stack.push_back(bf->code_ptr + offset);
     marked[offset] = true;
   }
@@ -270,7 +251,6 @@ int main(int argc, char *argv[]) {
     ip = cur_ip_stack.back();
     cur_ip_stack.pop_back();
   
-    if (visited[ip - bf->code_ptr]) continue;
     visited[ip - bf->code_ptr] = true;
 
     std::vector<char*> next_ips = move_next(noop);
@@ -278,18 +258,29 @@ int main(int argc, char *argv[]) {
     switch (next_ips.size()) {
     case 0:
       break;
-    case 1:
-      cur_ip_stack.push_back(next_ips[0]);
+    case 1: {
+      int offset0 = next_ips[0] - bf->code_ptr;
+      if (!visited[offset0]) {
+        cur_ip_stack.push_back(next_ips[0]);
+      }
       if (next_ips[0] != ip) { // JMP
-        marked[next_ips[0] - bf->code_ptr] = true;
+        marked[offset0] = true;
       }
       break;
-    case 2:
-      cur_ip_stack.push_back(next_ips[0]);
-      cur_ip_stack.push_back(next_ips[1]);
-      marked[next_ips[0] - bf->code_ptr] = true;
-      marked[next_ips[1] - bf->code_ptr] = true;
+    }
+    case 2: {
+      int offset0 = next_ips[0] - bf->code_ptr;
+      int offset1 = next_ips[1] - bf->code_ptr;
+      if (!visited[offset0]) {
+        cur_ip_stack.push_back(next_ips[0]);
+      }
+      if (!visited[offset1]) {
+        cur_ip_stack.push_back(next_ips[1]);
+      }
+      marked[offset0] = true;
+      marked[offset1] = true;
       break;
+    }
     default:
       throw std::runtime_error("ERROR: unexpected next_ips size: " + std::to_string(next_ips.size()));
     }
@@ -302,37 +293,24 @@ int main(int argc, char *argv[]) {
     char* current_ip = bf->code_ptr + i;
     ip = current_ip;
     move_next(noop);
-    
-    ranges.emplace_back(current_ip, (char)(ip - current_ip));
+
+    trie.insert(current_ip, ip);
     if (prev_ip && !marked[i]) {
-      ranges.emplace_back(prev_ip, (char)(ip - prev_ip));
+      trie.insert(prev_ip, ip);
     }
     
     prev_ip = current_ip;
   }
 
-  std::stable_sort(ranges.begin(), ranges.end());
-
-  size_t last_index_with_freq = -1;
-  for (size_t i = 0; i < ranges.size(); ++i) {
-    if (i == 0 || ranges[i] != ranges[i - 1]) {
-      last_index_with_freq++;
-      ranges[last_index_with_freq] = ranges[i];
-      ranges[last_index_with_freq].frequency = 1;
-    } else {
-      ranges[last_index_with_freq].frequency++;
-    }
-  }
-  ranges.resize(last_index_with_freq + 1);
-
-  std::stable_sort(ranges.begin(), ranges.end(), [](auto left, auto right) { 
+  std::vector<ByteRange> ranges = trie.collect();
+  std::stable_sort(ranges.begin(), ranges.end(), [](const ByteRange& left, const ByteRange& right) { 
     return left.frequency > right.frequency;
   });
 
-  for (auto& range : ranges) {
+  for (const ByteRange& range : ranges) {
     std::cout << range.frequency << " times: ";
-    ip = (char *)range.start;
-    while (ip < range.start + range.len) {
+    ip = range.start.get();
+    while (ip < range.start.get() + range.len) {
       move_next(print);
       std::cout << "; ";
     }
