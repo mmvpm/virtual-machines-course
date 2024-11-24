@@ -3,6 +3,7 @@
 #include "trie.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -143,8 +144,8 @@ static inline std::string handle_closure() {
 
 /* Moves ip to the next instruction and decodes it */
 
-static const std::string patterns[] = { "=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun" };
-static const std::string binops[] = { "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "||" };
+static const std::array<const std::string, 7> patterns = { "=str", "#string", "#array", "#sexp", "#ref", "#val", "#fun" };
+static const std::array<const std::string, 13> binops = { "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "||" };
 
 #define INVALID_OPCODE throw std::runtime_error("ERROR: invalid opcode " + std::to_string(h) + " " + std::to_string(l));
 
@@ -224,34 +225,50 @@ static std::vector<char*> move_next(const std::function<void(const std::string&)
 
 /* Main loop */
 
+struct ByteRange {
+  size_t start;
+  size_t frequency;
+  unsigned char len;
+
+  ByteRange(size_t start, unsigned char len, size_t frequency) : start(start), len(len), frequency(frequency) {}
+} __attribute__((packed));
+
 int main(int argc, char *argv[]) {
   if (argc < 2) {
     throw std::runtime_error("ERROR: no bytecode file\n");
   }
   read_file(argv[1]);
 
-  Trie trie;
-  std::vector<bool> visited(bf->eobf - ip + 1, false);
-  std::vector<bool> marked(bf->eobf - ip + 1, false);
-  std::vector<char*> cur_ip_stack;
-
-  std::set<int> start_offsets;
-  for (int i = 0; i < bf->public_symbols_number; i++) {
-    start_offsets.insert(bf->public_ptr[i * 2 + 1]);
-  }
-  for (int offset : start_offsets) {
-    cur_ip_stack.push_back(bf->code_ptr + offset);
-    marked[offset] = true;
-  }
-
   auto noop = [](const std::string& decoded) {};
   auto print = [](const std::string& decoded) { std::cout << decoded; };
 
+  std::vector<bool> visited(bf->eobf - ip + 1, false);
+  std::vector<bool> marked(bf->eobf - ip + 1, false);
+  
+  {
+  std::vector<size_t> cur_ip_stack;
+
+  auto push_to_ip_stack = [&](size_t offset) {
+    if (!visited[offset]) {
+      cur_ip_stack.push_back(offset);
+    }
+  };
+
+  for (int i = 0; i < bf->public_symbols_number; i++) {
+    if ((char*)(bf->public_ptr) + i * 2 + 1 > bf->eobf) {
+      throw std::runtime_error("ERROR: public symbol #" + std::to_string(i) + " refers to beyond the bytefile\n");
+    }
+    int offset = bf->public_ptr[i * 2 + 1];
+    push_to_ip_stack(offset);
+    marked[offset] = true;
+  }
+
   while (!cur_ip_stack.empty()) {
-    ip = cur_ip_stack.back();
+    int offset = cur_ip_stack.back();
+    ip = bf->code_ptr + offset;
     cur_ip_stack.pop_back();
   
-    visited[ip - bf->code_ptr] = true;
+    visited[offset] = true;
 
     std::vector<char*> next_ips = move_next(noop);
 
@@ -260,9 +277,7 @@ int main(int argc, char *argv[]) {
       break;
     case 1: {
       int offset0 = next_ips[0] - bf->code_ptr;
-      if (!visited[offset0]) {
-        cur_ip_stack.push_back(next_ips[0]);
-      }
+      push_to_ip_stack(offset0);
       if (next_ips[0] != ip) { // JMP
         marked[offset0] = true;
       }
@@ -271,12 +286,8 @@ int main(int argc, char *argv[]) {
     case 2: {
       int offset0 = next_ips[0] - bf->code_ptr;
       int offset1 = next_ips[1] - bf->code_ptr;
-      if (!visited[offset0]) {
-        cur_ip_stack.push_back(next_ips[0]);
-      }
-      if (!visited[offset1]) {
-        cur_ip_stack.push_back(next_ips[1]);
-      }
+      push_to_ip_stack(offset0);
+      push_to_ip_stack(offset1);
       marked[offset0] = true;
       marked[offset1] = true;
       break;
@@ -285,32 +296,48 @@ int main(int argc, char *argv[]) {
       throw std::runtime_error("ERROR: unexpected next_ips size: " + std::to_string(next_ips.size()));
     }
   }
+  } // delete cur_ip_stack
 
-  char* prev_ip = nullptr;
-  for (size_t i = 0; i < visited.size(); ++i) {
-    if (!visited[i]) continue;
+  auto traverse_bytecode = [&](auto&& func) {
+    int prev_i = -1;
+    for (size_t i = 0; i < visited.size(); ++i) {
+      if (!visited[i]) continue;
 
-    char* current_ip = bf->code_ptr + i;
-    ip = current_ip;
-    move_next(noop);
+      ip = bf->code_ptr + i;
+      move_next(noop);
+      size_t next_i = ip - bf->code_ptr;
 
-    trie.insert(current_ip, ip);
-    if (prev_ip && !marked[i]) {
-      trie.insert(prev_ip, ip);
+      func(i, next_i);
+      if (prev_i != -1 && !marked[i]) {
+        func(prev_i, next_i);
+      }
+
+      prev_i = i;
     }
-    
-    prev_ip = current_ip;
-  }
+  };
 
-  std::vector<ByteRange> ranges = trie.collect();
+  PatriciaTrie trie(bf->code_ptr);
+  traverse_bytecode([&](size_t start, size_t end) {
+    trie.insert(start, end);
+  });
+
+  std::vector<ByteRange> ranges;
+  ranges.reserve(trie.non_zero_nodes());
+  traverse_bytecode([&](size_t start, size_t end) {
+    size_t count = trie.remove_all(start, end);
+    if (count > 0) {
+      ranges.emplace_back(start, (unsigned char)(end - start), count);
+    }
+  });
+ 
   std::stable_sort(ranges.begin(), ranges.end(), [](const ByteRange& left, const ByteRange& right) { 
     return left.frequency > right.frequency;
   });
 
   for (const ByteRange& range : ranges) {
     std::cout << range.frequency << " times: ";
-    ip = range.start.get();
-    while (ip < range.start.get() + range.len) {
+    ip = bf->code_ptr + range.start;
+    while (ip < bf->code_ptr + range.start + range.len) {
       move_next(print);
       std::cout << "; ";
     }

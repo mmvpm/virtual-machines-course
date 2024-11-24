@@ -1,105 +1,107 @@
-#include <vector>
-#include <memory>
 #include <cstring>
+#include <iostream>
+#include <vector>
 
-static const int LEVEL_SIZE = 256;
-
-struct ByteRange {
-  std::unique_ptr<char[]> start;
-  char len;
-  int frequency;
-
-  ByteRange(const std::vector<char>& path, int _frequency) : len((char)path.size()), frequency(_frequency) {
-    start = std::make_unique<char[]>(len);
-    std::memcpy(start.get(), path.data(), path.size());
-  }
-
-  ByteRange(ByteRange&& other) : start(std::move(other.start)), len(other.len), frequency(other.frequency) {}
-
-  ByteRange& operator=(ByteRange&& other) {
-    if (this != &other) {
-      start = std::move(other.start);
-      len = other.len;
-      frequency = other.frequency;
-    }
-    return *this;
-  }
-
-  ByteRange(const ByteRange&) = delete;
-  ByteRange& operator=(const ByteRange&) = delete;
-};
-
-struct TrieNode {
-  int count;
-  TrieNode **children;
-
-  TrieNode() : count(0), children(nullptr) {}
-
-  ~TrieNode() {
-    if (!children) return;
-    for (int i = 0; i < LEVEL_SIZE; ++i) {
-      delete children[i];
-    }
-    delete[] children;
-  }
-
-  void init_children() {
-    if (children) return;
-    children = new TrieNode*[LEVEL_SIZE]();
-    for (int i = 0; i < LEVEL_SIZE; ++i) {
-      children[i] = nullptr;
-    }
-  }
-};
-
-class Trie {
+class PatriciaTrie {
 public:
-  Trie() : root(new TrieNode()), non_zero_nodes(0) {}
+  struct Node {
+    std::vector<Node*> children;
+    size_t start;
+    size_t len;
+    size_t count;
 
-  ~Trie() {
-    delete root;
-  }
+    Node(size_t start, size_t len, size_t count) : start(start), len(len), count(count) {}
 
-  void insert(char *start, char *end) {
-    TrieNode *node = root;
-    for (char *it = start; it != end; ++it) {
-      uint8_t index = (uint8_t)(*it);
-      if (!node->children) {
-        node->init_children();
+    ~Node() { for (auto child : children) delete child; }
+  };
+
+  PatriciaTrie(char* data) : root(new Node(0, 0, 0)), data(data), _non_zero_nodes(0) {}
+
+  ~PatriciaTrie() { delete root; }
+
+  void insert(size_t start, size_t end) {
+    Node* node = root;
+    size_t cur = start;
+
+    while (cur < end) {
+      bool cplen_found = false;
+      size_t cur_len = end - cur;
+
+      for (auto& child : node->children) {  
+        size_t cplen = common_prefix_length(child->start, child->len, cur, cur_len);
+        
+        if (cplen == 0) {
+          continue;
+        }
+        cplen_found = true;
+        
+        if (cplen == child->len) {
+          if (cplen == cur_len) {
+            child->count += 1;
+            _non_zero_nodes += child->count == 1;
+            return;
+          }
+          cur += child->len;
+          node = child;
+          break;
+        } else {
+          Node* new_node = new Node(child->start + cplen, child->len - cplen, child->count);
+          new_node->children = std::move(child->children);
+          
+          Node* cur_node = new Node(cur + cplen, cur_len - cplen, 1);
+
+          child->len = cplen;
+          child->count = 0;
+          child->children = { new_node, cur_node };
+          return;
+        }
       }
-      if (!node->children[index]) {
-        node->children[index] = new TrieNode();
+
+      if (!cplen_found) {
+        Node* cur_node = new Node(cur, cur_len, 1);
+        node->children.push_back(cur_node);
+        return;
       }
-      node = node->children[index];
     }
-    if (node->count == 0) non_zero_nodes++;
-    node->count++;
+
+    throw new std::runtime_error("Impossible");
   }
 
-  std::vector<ByteRange> collect() {
-    std::vector<char> path;
-    std::vector<ByteRange> bytecodes;
-    bytecodes.reserve(non_zero_nodes);
-    collect(root, path, bytecodes);
-    return bytecodes;
+  size_t remove_all(size_t start, size_t end) {
+    return remove_all(root, start, end);
   }
+
+  size_t remove_all(Node* node, size_t start, size_t end) {
+    size_t cur_len = end - start;
+    for (const auto& child : node->children) {
+      size_t cplen = common_prefix_length(child->start, child->len, start, cur_len);
+      if (cplen == 0) continue;
+      if (cplen == child->len) {
+        if (cplen == cur_len) {
+          size_t result = child->count;
+          _non_zero_nodes -= child->count > 0;
+          child->count = 0;
+          return result;
+        }
+        return remove_all(child, start + cplen, end);
+      }
+      return 0;
+    }
+    return 0;
+  }
+
+  size_t non_zero_nodes() { return _non_zero_nodes; }
 
 private:
-  TrieNode *root;
-  int non_zero_nodes;
+  Node* root;
+  char* data;
+  size_t _non_zero_nodes;
 
-  void collect(TrieNode *node, std::vector<char> &path, std::vector<ByteRange> &bytecodes) {
-    if (node->count > 0) {
-      bytecodes.emplace_back(path, node->count);
+  size_t common_prefix_length(size_t start1, size_t len1, size_t start2, size_t len2) {
+    size_t i = 0;
+    while (i < len1 && i < len2 && data[start1 + i] == data[start2 + i]) {
+      ++i;
     }
-    
-    if (!node->children) return;
-
-    for (int i = 0; i < LEVEL_SIZE; ++i) {
-      if (!node->children[i]) continue;
-      path.push_back((char)i);
-      collect(node->children[i], path, bytecodes);
-      path.pop_back();
-    }
+    return i;
   }
 };
