@@ -250,6 +250,7 @@ int main(int argc, char *argv[]) {
 
   auto push_to_ip_stack = [&](size_t offset) {
     if (!visited[offset]) {
+      visited[offset] = true;
       cur_ip_stack.push_back(offset);
     }
   };
@@ -267,8 +268,6 @@ int main(int argc, char *argv[]) {
     int offset = cur_ip_stack.back();
     ip = bf->code_ptr + offset;
     cur_ip_stack.pop_back();
-  
-    visited[offset] = true;
 
     std::vector<char*> next_ips = move_next(noop);
 
