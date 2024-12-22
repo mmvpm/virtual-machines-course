@@ -68,9 +68,6 @@ enum { PLUS, MINUS, MULTIPLY, DIVIDE, MOD, LESS, LESS_EQUAL, GREATER, GREATER_EQ
 
 /* Gets a string from a string table by an index */
 static char *get_string(int pos) {
-  if (pos >= bf->stringtab_size) {
-    failure("ERROR: index out of bounds of string pool\n");
-  }
   return &bf->string_ptr[pos];
 }
 
@@ -127,17 +124,11 @@ static inline int sp_peek() { return *(sp() + 1); }
 static inline void sp_push(int value) {
   sp_assign(value);
   sp_add(-1);
-  if (sp() == call_stack) {
-    failure("ERROR: gc stack out of memory\n");
-  }
 }
 
 static inline void sp_push_unboxed(int value) { sp_push(BOX(value)); }
 
 static inline int sp_pop() {
-  if (sp() == global_area - 1) {
-    failure("ERROR: try to pop from empty gc stack\n");
-  }
   sp_add(1);
   return *sp();
 }
@@ -165,23 +156,14 @@ static inline int call_stack_pop() {
 /* Instruction pointer */
 
 static inline void ip_assign(char *new_ip) {
-  if (!(bf->code_ptr <= new_ip && new_ip < bf->eobf)) {
-    failure("ERROR: new ip out of bounds\n");
-  }
   ip = new_ip;
 }
 
 static inline unsigned char ip_next_byte() {
-  if (ip + 1 >= bf->eobf) {
-    failure("ERROR: ip out of bounds (ip + 1 >= eobf)\n");
-  }
   return *ip++;
 }
 
 static inline int ip_next_int() {
-  if (ip + sizeof(int) >= bf->eobf) {
-    failure("ERROR: ip out of bounds (ip + %d >= eobf)\n", sizeof(int));
-  }
   return (ip += sizeof(int), *(int *)(ip - sizeof(int)));
 }
 
@@ -391,8 +373,17 @@ static void run() {
 
       case BEGIN:  
       case CBEGIN: {
-        int n_args = ip_next_int();
+        int n_args_with_stack_size = ip_next_int();
         int n_locals = ip_next_int();
+        
+        int n_args = n_args_with_stack_size & 0x0000FFFF;
+        int method_stack_size = (int)((((unsigned int)n_args_with_stack_size) & 0xFFFF0000) >> 16);
+        int required_stack_size = n_args + n_locals + method_stack_size + sizeof(int);
+        int left_stack_size = __gc_stack_top - call_stack;
+        debug("0x%.8x: method_stack_size = %d, left = %d\n", (unsigned int)(ip - bf->code_ptr - 9), method_stack_size, left_stack_size);
+        if (required_stack_size > left_stack_size) {
+          failure("ERROR: gc stack out of memory: required %d, left %d\n", required_stack_size, left_stack_size);
+        }
 
         call_stack_push((int)fp);
         call_stack_push(cur_n_args);
