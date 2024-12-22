@@ -22,6 +22,8 @@ extern void *Bstring(void *);
 extern int Bstring_patt(void *, void *);
 extern int Barray_patt(void *, int);
 
+#define debug if (false) printf
+
 void *__start_custom_data;
 void *__stop_custom_data;
 
@@ -238,6 +240,8 @@ static void run() {
   do {
     unsigned char x = ip_next_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
 
+    debug("0x%.8x:\t%d ", ip - bf->code_ptr - 1, global_area - 1 - __gc_stack_top);
+
     switch (h) {
     case BINOP:
       int b = sp_pop_unboxed();
@@ -323,6 +327,7 @@ static void run() {
         if (call_stack_top != call_stack_bottom - 1) {
           ip = (char *)call_stack_pop();
         } else {
+          debug("%d\n", global_area - 1 - __gc_stack_top);
           return;
         }
 
@@ -568,6 +573,7 @@ static void run() {
     default:
       FAIL;
     }
+    debug("%d\n", global_area - 1 - __gc_stack_top);
   } while (1);
 }
 
