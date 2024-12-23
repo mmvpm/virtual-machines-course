@@ -367,7 +367,7 @@ static void traverse() {
 
     case LDA:
       name = "LDA " + get_scope(l) + " " + ip_next_int_str();
-      process(node, name, cur_stack_size, 2 * PUSH);
+      process(node, name, cur_stack_size, PUSH);
       break;
 
     case ST:

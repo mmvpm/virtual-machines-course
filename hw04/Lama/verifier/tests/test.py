@@ -21,7 +21,7 @@ test_files = sorted(
 if not os.path.exists('temp'):
     os.makedirs('temp')
 
-failed_tests = 0
+failed_tests = []
 for test_filename in test_files:
     # compile
     os.system(f'{lamac} -b {regression_dir}/{test_filename}.lama')
@@ -30,7 +30,8 @@ for test_filename in test_files:
     fail = os.system(f'{verifier} {test_filename}.bc')
     if fail:
         print(f'{test_filename} failed on verifier')
-        break
+        failed_tests.append(test_filename)
+        continue
 
     # run interpreter-verified on testXXX_verified.bc
     os.system(f'touch temp/{test_filename}.log')
@@ -40,12 +41,15 @@ for test_filename in test_files:
     fail = os.system(f'diff {regression_dir}/{test_filename}.log temp/{test_filename}.log')
     if fail:
         print(f'{test_filename} failed on interpreter-verified')
-        break
+        failed_tests.append(test_filename)
+        continue
 
     print(f'{test_filename} passed')
 
-else:
+if len(failed_tests) == 0:
     print('Regression tests passed!')
+else:
+    print('Failed:', ', '.join(failed_tests))
 
 
 # compare performance

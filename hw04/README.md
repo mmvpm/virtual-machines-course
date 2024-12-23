@@ -24,8 +24,18 @@ make tests
 test001 passed
 test002 passed
 ...
+test046 passed
+test050 passed
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  ERROR: stack size is out of bounds: -1
+
+Aborted (core dumped)
+test054 failed on verifier
+test059 passed
+test063 passed
+...
 test110 passed
-Regression tests passed!
+Failed: test054
 [verifier] Elapsed time on "Sort.bc": 0.002 seconds
 [iterative] Elapsed time on "Sort.bc": 3.491 seconds
 [iterative-verified] Elapsed time on "Sort.bc": 3.139 seconds
